@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Agnes media tools">
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#101a2e"/>
+  <rect x="12" y="12" width="40" height="30" rx="4" fill="none" stroke="#e8eefc" stroke-width="3"/>
+  <circle cx="24" cy="22" r="4" fill="#ffb454"/>
+  <path d="M14 40 L26 28 L34 36 L42 30 L50 40 Z" fill="#3fb6c9"/>
+  <path d="M40 46 L40 58 L52 52 Z" fill="#ffb454"/>
+</svg>

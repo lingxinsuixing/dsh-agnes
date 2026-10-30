@@ -1,0 +1,11 @@
+# @lingxinsuixing/dsh-agnes — Agnes 多模态工具（识图/图生/视频）
+# 用户层 override 本行补 config（整行重述；apiKey 等其余字段由 schema 默认值补齐）：
+#   - override:
+#       - id: agnes-multimodal
+#         name: '@lingxinsuixing/dsh-agnes'
+#         config:
+#           apiKey: '...'
+- insert:
+    - id: agnes-multimodal
+      name: '@lingxinsuixing/dsh-agnes'
+      config: {}

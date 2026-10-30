@@ -1,0 +1,56 @@
+{
+  "name": "@lingxinsuixing/dsh-agnes",
+  "version": "1.2.0",
+  "type": "module",
+  "description": "Agnes AI image generation and video generation for DeepSeek Harness (main features), plus optional image recognition. Tool results are text-only; generated media is written to a local folder.",
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "agnes",
+    "vision",
+    "image",
+    "video",
+    "multimodal"
+  ],
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "screenshots.json",
+    "assets/*.png"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": ">=3.18.1-rc.1 <4.0.0-0 || >=3.18.5-alpha.1 <4.0.0-0 || >=3.18.6-alpha.1 <4.0.0-0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lingxinsuixing/dsh-agnes.git"
+  },
+  "homepage": "https://github.com/lingxinsuixing/dsh-agnes",
+  "bugs": {
+    "url": "https://github.com/lingxinsuixing/dsh-agnes/issues"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-plugin-manager",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
+  "private": true
+}

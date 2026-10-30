@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Agnes Multimodal Tools",
+    "description": "Agnes image generation and video generation for DeepSeek Harness (main features), plus optional image recognition that can be switched off. Text-only results; artifacts saved to a local folder. API key is configured on the plugin's settings page and stored in this profile."
+  }
+}
