@@ -60,7 +60,7 @@ export const Config = Schema.object({
   imageModel: Schema.string().default('agnes-image-2.5-flash').description('主要：图像生成模型'),
   videoModel: Schema.string().default('agnes-video-2.5').description('主要：视频生成模型（-flash 变体仅 720P/限参考媒体）'),
   outputDir: Schema.string().default('').description('生成产物保存目录（绝对路径）。留空则保存到 DSH 主目录下的 media 子目录（$DSH_HOME/media，未设置则用 ~/.dsh/media）'),
-  allowedReadRoots: Schema.array(Schema.string()).default([]).description('本地图片读取白名单（绝对路径列表）。留空 = 不限制；填了就只允许读取这些目录下的文件'),
+  allowedReadRoots: Schema.union([Schema.array(Schema.string()), Schema.string()]).default([]).description('本地图片读取白名单（绝对路径列表）。留空 = 不限制；填了就只允许读取这些目录下的文件。数组或逗号分隔字符串都行'),
   maxImageBytes: Schema.number().default(10 * 1024 * 1024).description('识图输入图片字节上限'),
   maxDownloadBytes: Schema.number().default(200 * 1024 * 1024).description('单个产物下载体积上限（字节）'),
   maxResponseBytes: Schema.number().default(32 * 1024 * 1024).description('单次 API 响应体上限（字节）'),
@@ -69,9 +69,19 @@ export const Config = Schema.object({
   pollTimeoutMs: Schema.number().default(1_800_000).description('视频任务轮询总时限（ms）'),
 })
 
+/**
+ * 读取白名单归一：数组（['D:/a','D:/b']）或逗号分隔字符串（'D:/a, D:/b'）都认。
+ * 配置页写字符串最安全——YAML 里一个标量不会把 patch 写坏。
+ */
+export function normalizeReadRoots(roots) {
+  if (Array.isArray(roots)) return roots.map((r) => String(r ?? '').trim()).filter(Boolean)
+  if (typeof roots === 'string') return roots.split(',').map((r) => r.trim()).filter(Boolean)
+  return []
+}
+
 /** 本地图片读取白名单：config.allowedReadRoots 非空时，只允许读这些根目录下的文件 */
 function assertReadablePath(abs, roots, tool) {
-  const list = (Array.isArray(roots) ? roots : []).map((r) => String(r ?? '').trim()).filter(Boolean)
+  const list = normalizeReadRoots(roots)
   if (!list.length) return
   const ok = list.some((root) => {
     const r = resolve(root)

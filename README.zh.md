@@ -53,7 +53,7 @@ AGNES_API_KEY: your-key
 ## 可选功能：图片识别
 
 识图是可选项。在插件配置里设 `enableRecognition: false`，`agnes_image_recognize` 就**完全不注册**，
-只留生图与生视频两个主要功能。
+只留生图与生视频两个主要功能。工具是在插件加载时注册的，所以关掉它要**重启一次 DSH** 才生效。
 
 > **声明：识图功能不需要改 provider 就能用**——它跟 DSH 用 `openai-responses` 还是 `openai-completions` 无关。
 > 只有 DSH 原生的 `read_image` 要在主会话里看图时，provider 才必须改成 `openai-completions`；
@@ -73,6 +73,11 @@ AGNES_API_KEY: your-key
 ## 产物放在哪
 
 生成的媒体文件写入 `outputDir` 指定的目录（默认：DSH 主目录下的 `media/`，即 `$DSH_HOME/media`；没设 `$DSH_HOME` 就用 `~/.dsh/media`），每次调用会返回写入的绝对路径。
+也可以在插件页直接改（插件 → 本包 → 页 → 「产物目录与读取范围」），同页还能设 `allowedReadRoots`——
+识图允许读取的目录（留空 = 不限制）。
+
+有免费模型可用：生图全系当前免费，视频有免费档（`agnes-video-2.5-flash`，仅 720P）。
+模型清单与价格：https://www.agnes-ai.cn/zh-Hans/docs/overview
 
 `saveTo` 必须指向**已存在**的目录：插件不会在任意路径自动建目录，文件名也由插件生成，不会覆盖你已有的文件。
 

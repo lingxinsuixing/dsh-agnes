@@ -3,14 +3,16 @@
  *
  * 在 `plugins.bundle.config` 槽注册（key = 本包名 @lingxinsuixing/dsh-agnes）：
  * Web 界面「插件 → @lingxinsuixing/dsh-agnes」页的描述与行之间显示中文配置面板，包含：
- *   1. 功能说明（主要功能 2 个 + 可选能力 1 个，分组列出）
+ *   1. 功能说明（主要功能 2 个 + 可选能力 1 个，分组列出）+ 免费模型提示与官方模型文档链接
  *   2. API Key 配置（经 configForms 写回本 profile 的 config.apiKey，HMR 热生效）
- *   3. 权限说明（网络 / 本地文件 / 密钥 / 会话隐私 / 参考媒体）
+ *   3. 产物目录与读取白名单（config.outputDir / config.allowedReadRoots）
+ *   4. 可选能力开关（config.enableRecognition；**改完要重启 DSH** 才重新注册工具）
+ *   5. 权限说明（网络 / 本地文件 / 密钥 / 会话隐私 / 参考媒体）
  *
  * 工具分层：
  *   主要功能（永远注册）：agnes_image_generate（生图）、agnes_video_generate（生视频）
  *   可选能力（带开关）：  agnes_image_recognize（识图）——由 config.enableRecognition 控制，
- *                        面板上的复选框直接写这个字段（热生效；没立刻变化就重启一次 DSH）
+ *                        面板上的复选框直接写这个字段；**改完要重启一次 DSH** 才生效（工具在加载时注册）
  *
  * 纯 JS client 模块：只 require('react')（浏览器模块表），不引用宿主 client 包；
  * 样式用主题 token（var 带回退），控件自绘。
@@ -55,16 +57,35 @@ window.__ModuleLoader__.load({
         optTitle: 'Optional feature: image recognition',
         optBody:
           'Recognition sends the image to the Agnes vision model and brings back text only — no image bytes ' +
-          'ever enter the conversation. Switch it off to keep only image and video generation. If the tool list ' +
-          'does not change right away, restart DSH once.',
+          'ever enter the conversation. Switch it off to keep only image and video generation.',
+        optRestart:
+          'After switching, restart DSH once to apply it: tools are registered while the plugin loads, so a ' +
+          'config change does not re-register them.',
         optDeclare:
           'Statement: recognition works without changing the provider — it is independent of whether DSH uses ' +
           'openai-responses or openai-completions. Only DSH\u2019s own read_image needs the provider switched to ' +
           'openai-completions; without that switch, do not give the model image input, because one read_image ' +
           'bricks the whole conversation (400 is not retried and every turn rebuilds the full history).',
-        optOkOn: 'Recognition is enabled. The tool list updates live (or after one DSH restart).',
-        optOkOff: 'Recognition is disabled. The tool list updates live (or after one DSH restart).',
+        optOkOn: 'Recognition is enabled. Restart DSH once to apply it.',
+        optOkOff: 'Recognition is disabled. Restart DSH once to apply it.',
         optFail: 'The change was not accepted. Try again or edit the profile\u2019s cordis.patch.yml manually.',
+        pathsTitle: 'Output folder and read scope',
+        pathsBody:
+          'outputDir: where generated images and videos are written (empty = the media folder under the DSH home ' +
+          'directory, $DSH_HOME/media or ~/.dsh/media). allowedReadRoots: only these folders may be read for ' +
+          'recognition (empty = no restriction). Both apply from the next call on.',
+        outDirLabel: 'Output folder (outputDir)',
+        outDirPlaceholder: 'empty = $DSH_HOME/media',
+        rootsLabel: 'Local read allowlist (allowedReadRoots)',
+        rootsPlaceholder: 'comma-separated absolute paths; empty = no restriction',
+        pathsSave: 'Save',
+        pathsSaving: 'Saving\u2026',
+        pathsOk: 'Saved. The new settings apply from the next call on.',
+        pathsFail: 'The change was not accepted. Try again or edit the profile\u2019s cordis.patch.yml manually.',
+        freeModels:
+          'Free models are available: the whole image model line is currently free, and the video line has a ' +
+          'free tier (agnes-video-2.5-flash, 720P only). Model list and prices:',
+        modelsLink: 'https://www.agnes-ai.cn/zh-Hans/docs/overview',
         enableLabel: 'Enable image recognition (agnes_image_recognize)',
         warnTitle: 'Do not use read_image inside the main conversation',
         warnBody:
@@ -118,15 +139,31 @@ window.__ModuleLoader__.load({
         optGroup: '可选能力',
         optTitle: '可选能力：图片识别',
         optBody:
-          '识图把图片发给 Agnes 视觉模型，回来的只有文字，图片字节不会进对话。关掉它就只剩生图与生视频。' +
-          '如果工具列表没有立刻变化，重启一次 DSH 即可。',
+          '识图把图片发给 Agnes 视觉模型，回来的只有文字，图片字节不会进对话。关掉它就只剩生图与生视频。',
+        optRestart:
+          '切换后需要重启一次 DSH 才生效：工具是在插件加载时注册的，改配置不会重新注册工具。',
         optDeclare:
           '声明：识图功能不需要改 provider 就能用——它跟 DSH 的 openai-responses / openai-completions 无关。' +
           '只有 DSH 原生的 read_image 要在主会话里看图时，provider 才必须改成 openai-completions；' +
           '不改就别给模型勾图片输入能力，否则一次 read_image 就会把整个会话钉死（400 不重试 + 每轮重建全部历史）。',
-        optOkOn: '已启用识图。工具列表会热更新（没立刻变化就重启一次 DSH）。',
-        optOkOff: '已关闭识图。工具列表会热更新（没立刻变化就重启一次 DSH）。',
+        optOkOn: '已启用识图。重启一次 DSH 后生效。',
+        optOkOff: '已关闭识图。重启一次 DSH 后生效。',
         optFail: '改动未被接受，请重试或手改 profile 的 cordis.patch.yml。',
+        pathsTitle: '产物目录与读取范围',
+        pathsBody:
+          'outputDir：生成的图片与视频写到哪个目录（留空 = DSH 主目录下的 media 子目录，即 $DSH_HOME/media，没设则 ~/.dsh/media）。' +
+          'allowedReadRoots：识图只允许读这些目录里的文件（留空 = 不限制）。两项都从下一次调用起生效。',
+        outDirLabel: '产物目录（outputDir）',
+        outDirPlaceholder: '留空 = $DSH_HOME/media',
+        rootsLabel: '本地读取白名单（allowedReadRoots）',
+        rootsPlaceholder: '逗号分隔的绝对路径；留空 = 不限制',
+        pathsSave: '保存',
+        pathsSaving: '保存中…',
+        pathsOk: '已保存，从下一次调用起生效。',
+        pathsFail: '改动未被接受，请重试或手改 profile 的 cordis.patch.yml。',
+        freeModels:
+          '有免费模型可用：生图全系当前免费，视频有免费档（agnes-video-2.5-flash，仅 720P）。模型清单与价格：',
+        modelsLink: 'https://www.agnes-ai.cn/zh-Hans/docs/overview',
         enableLabel: '启用识图（agnes_image_recognize）',
         warnTitle: '不要在主会话里用 read_image 看图',
         warnBody:
@@ -187,6 +224,7 @@ window.__ModuleLoader__.load({
 .agn-warn p{margin:0;color:var(--dsw-alias-label-secondary,#57606a)}
 .agn-check{display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer}
 .agn-check input{width:15px;height:15px;margin:0;cursor:pointer}
+.agn-panel a{color:var(--dsw-alias-state-info-primary,#0969da);text-decoration:underline}
 `
 
     function AgnesPanel(props) {
@@ -214,6 +252,18 @@ window.__ModuleLoader__.load({
       const recogEnabled = value.enableRecognition !== false
       const [recogDraft, setRecogDraft] = useState(recogEnabled)
 
+      // 产物目录（outputDir）与本地读取白名单（allowedReadRoots：数组或逗号分隔字符串都认）
+      const outDirValue = typeof value.outputDir === 'string' ? value.outputDir : ''
+      const rootsValue = Array.isArray(value.allowedReadRoots)
+        ? value.allowedReadRoots.join(', ')
+        : typeof value.allowedReadRoots === 'string'
+          ? value.allowedReadRoots
+          : ''
+      const [outDirDraft, setOutDirDraft] = useState(outDirValue)
+      const [rootsDraft, setRootsDraft] = useState(rootsValue)
+      const [savingPaths, setSavingPaths] = useState(false)
+      const [pathsMsg, setPathsMsg] = useState(null)
+
       useEffect(() => {
         setDraft(currentKey)
       }, [currentKey])
@@ -221,6 +271,14 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         setRecogDraft(recogEnabled)
       }, [recogEnabled])
+
+      useEffect(() => {
+        setOutDirDraft(outDirValue)
+      }, [outDirValue])
+
+      useEffect(() => {
+        setRootsDraft(rootsValue)
+      }, [rootsValue])
 
       async function save() {
         if (!form || !writable || savingKey) return
@@ -234,6 +292,24 @@ window.__ModuleLoader__.load({
           setMsg({ kind: 'err', text: t('saveFail') })
         } finally {
           setSavingKey(false)
+        }
+      }
+
+      async function savePaths() {
+        if (!form || !writable || savingPaths) return
+        setSavingPaths(true)
+        setPathsMsg(null)
+        try {
+          // 白名单写逗号分隔字符串：YAML 里一个标量最稳，不会把 patch 写坏；
+          // 插件侧 normalizeReadRoots 会把它拆回数组（schema 也接受数组）
+          const roots = rootsDraft.split(',').map((s) => s.trim()).filter(Boolean).join(', ')
+          const okDir = await form.set('outputDir', outDirDraft.trim())
+          const okRoots = await form.set('allowedReadRoots', roots)
+          setPathsMsg(okDir && okRoots ? { kind: 'ok', text: t('pathsOk') } : { kind: 'err', text: t('pathsFail') })
+        } catch {
+          setPathsMsg({ kind: 'err', text: t('pathsFail') })
+        } finally {
+          setSavingPaths(false)
         }
       }
 
@@ -275,6 +351,14 @@ window.__ModuleLoader__.load({
           h('h4', { className: 'agn-sub' }, t('optGroup')),
           h('ul', null,
             h('li', null, h('b', { className: 'agn-mono' }, 'agnes_image_recognize'), '：', t('toolRecognize')),
+          ),
+          h('p', { className: 'agn-status' },
+            t('freeModels'), ' ',
+            h('a', {
+              href: 'https://www.agnes-ai.cn/zh-Hans/docs/overview',
+              target: '_blank',
+              rel: 'noreferrer',
+            }, t('modelsLink')),
           ),
         ),
 
@@ -330,6 +414,49 @@ window.__ModuleLoader__.load({
             : h('p', { className: 'agn-status', role: 'status' }, t('formMissing')),
         ),
 
+        // 3.5) 产物目录与读取白名单
+        h('section', null,
+          h('h3', null, t('pathsTitle')),
+          h('p', null, t('pathsBody')),
+          form
+            ? h('div', null,
+                h('div', { className: 'agn-krow' },
+                  h('span', { className: 'agn-klabel' }, t('outDirLabel')),
+                  h('input', {
+                    className: 'agn-input',
+                    type: 'text',
+                    value: outDirDraft,
+                    placeholder: t('outDirPlaceholder'),
+                    disabled: !writable || savingPaths,
+                    onChange: (e) => setOutDirDraft(e.target.value),
+                    'aria-label': t('outDirLabel'),
+                  }),
+                ),
+                h('div', { className: 'agn-krow' },
+                  h('span', { className: 'agn-klabel' }, t('rootsLabel')),
+                  h('input', {
+                    className: 'agn-input',
+                    type: 'text',
+                    value: rootsDraft,
+                    placeholder: t('rootsPlaceholder'),
+                    disabled: !writable || savingPaths,
+                    onChange: (e) => setRootsDraft(e.target.value),
+                    'aria-label': t('rootsLabel'),
+                  }),
+                ),
+                h('div', { className: 'agn-krow' },
+                  h('button', {
+                    className: 'agn-btn agn-btn-primary',
+                    type: 'button',
+                    onClick: savePaths,
+                    disabled: !writable || savingPaths,
+                  }, savingPaths ? t('pathsSaving') : t('pathsSave')),
+                ),
+                pathsMsg && h('p', { className: 'agn-status ' + (pathsMsg.kind === 'ok' ? 'agn-status-ok' : 'agn-status-err'), role: 'status' }, pathsMsg.text),
+              )
+            : h('p', { className: 'agn-status', role: 'status' }, t('formMissing')),
+        ),
+
         // 4) 可选能力开关：识图
         h('section', null,
           h('h3', null, t('optTitle')),
@@ -346,6 +473,7 @@ window.__ModuleLoader__.load({
                 h('span', null, t('enableLabel')),
               )
             : h('p', { className: 'agn-status', role: 'status' }, t('formMissing')),
+          h('p', { className: 'agn-status' }, t('optRestart')),
           optMsg && h('p', { className: 'agn-status ' + (optMsg.kind === 'ok' ? 'agn-status-ok' : 'agn-status-err'), role: 'status' }, optMsg.text),
         ),
 
