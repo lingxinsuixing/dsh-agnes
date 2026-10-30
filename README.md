@@ -39,6 +39,17 @@ Every tool returns text: a path, a URL and a short summary. Nothing binary is pu
 Note on `size`: the API maps an exact size such as `1920x1080` to the nearest tier, so the `size` in the
 result is the **real pixel size of the file on disk**, not necessarily what was asked for.
 
+## Models
+
+| Capability | Default model | Do you need to change it? |
+|---|---|---|
+| Recognition | `agnes-3.0-flash` | No — recognition runs on a chat model with vision; the default is multimodal and free |
+| Image generation | `agnes-image-2.5-flash` | No — it supports every size tier, every ratio and reference images |
+| Video generation | `agnes-video-2.5` | **Yes, if you want the free tier** — `agnes-video-2.5-flash` is free but outputs 720P only and cannot take a reference video |
+
+You can change all three from the plugin page (plugin → this package → page → “Models”).
+The whole image model line is currently free. Model list and prices: https://www.agnes-ai.cn/zh-Hans/docs/overview
+
 ## Samples
 
 Real output from `agnes_image_generate` (2K, 16:9), produced with this plugin:

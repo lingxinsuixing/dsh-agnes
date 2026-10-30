@@ -5,9 +5,10 @@
  * Web 界面「插件 → @lingxinsuixing/dsh-agnes」页的描述与行之间显示中文配置面板，包含：
  *   1. 功能说明（主要功能 2 个 + 可选能力 1 个，分组列出）+ 免费模型提示与官方模型文档链接
  *   2. API Key 配置（经 configForms 写回本 profile 的 config.apiKey，HMR 热生效）
- *   3. 产物目录与读取白名单（config.outputDir / config.allowedReadRoots）
- *   4. 可选能力开关（config.enableRecognition；**改完要重启 DSH** 才重新注册工具）
- *   5. 权限说明（网络 / 本地文件 / 密钥 / 会话隐私 / 参考媒体）
+ *   3. 模型选择（config.textModel / imageModel / videoModel，默认值写在文案里）
+ *   4. 产物目录与读取白名单（config.outputDir / config.allowedReadRoots）
+ *   5. 可选能力开关（config.enableRecognition；**改完要重启 DSH** 才重新注册工具）
+ *   6. 权限说明（网络 / 本地文件 / 密钥 / 会话隐私 / 参考媒体）
  *
  * 工具分层：
  *   主要功能（永远注册）：agnes_image_generate（生图）、agnes_video_generate（生视频）
@@ -82,10 +83,22 @@ window.__ModuleLoader__.load({
         pathsSaving: 'Saving\u2026',
         pathsOk: 'Saved. The new settings apply from the next call on.',
         pathsFail: 'The change was not accepted. Try again or edit the profile\u2019s cordis.patch.yml manually.',
-        freeModels:
-          'Free models are available: the whole image model line is currently free, and the video line has a ' +
-          'free tier (agnes-video-2.5-flash, 720P only). Model list and prices:',
+        modelTitle: 'Models',
+        modelBody:
+          'Defaults: recognition uses agnes-3.0-flash, image generation uses agnes-image-2.5-flash, video uses ' +
+          'agnes-video-2.5. The whole image model line is currently free; the video line also has a free tier ' +
+          '(agnes-video-2.5-flash) that outputs 720P only and cannot take a reference video. Model list:',
         modelsLink: 'https://www.agnes-ai.cn/zh-Hans/docs/overview',
+        textModelLabel: 'Recognition model (textModel)',
+        textModelPlaceholder: 'agnes-3.0-flash / agnes-2.5-flash / agnes-3.0-pro',
+        imageModelLabel: 'Image model (imageModel)',
+        imageModelPlaceholder: 'agnes-image-2.5-flash / 2.1-flash / 2.0-flash (2.0 takes exact sizes only)',
+        videoModelLabel: 'Video model (videoModel)',
+        videoModelPlaceholder: 'agnes-video-2.5 (standard) / 2.5-flash (free tier, 720P only)',
+        modelSave: 'Save models',
+        modelSaving: 'Saving\u2026',
+        modelOk: 'Saved. The new models are used by the next call.',
+        modelFail: 'The change was not accepted. Try again or edit the profile\u2019s cordis.patch.yml manually.',
         enableLabel: 'Enable image recognition (agnes_image_recognize)',
         warnTitle: 'Do not use read_image inside the main conversation',
         warnBody:
@@ -161,9 +174,21 @@ window.__ModuleLoader__.load({
         pathsSaving: '保存中…',
         pathsOk: '已保存，从下一次调用起生效。',
         pathsFail: '改动未被接受，请重试或手改 profile 的 cordis.patch.yml。',
-        freeModels:
-          '有免费模型可用：生图全系当前免费，视频有免费档（agnes-video-2.5-flash，仅 720P）。模型清单与价格：',
         modelsLink: 'https://www.agnes-ai.cn/zh-Hans/docs/overview',
+        modelTitle: '模型',
+        modelBody:
+          '默认：识图用 agnes-3.0-flash，生图用 agnes-image-2.5-flash，生视频用 agnes-video-2.5。' +
+          '生图全系当前免费；视频也有免费档（agnes-video-2.5-flash），但只出 720P，且不能带参考视频。模型清单：',
+        textModelLabel: '识图模型（textModel）',
+        textModelPlaceholder: 'agnes-3.0-flash / agnes-2.5-flash / agnes-3.0-pro',
+        imageModelLabel: '生图模型（imageModel）',
+        imageModelPlaceholder: 'agnes-image-2.5-flash / 2.1-flash / 2.0-flash（2.0 只接精确尺寸）',
+        videoModelLabel: '生视频模型（videoModel）',
+        videoModelPlaceholder: 'agnes-video-2.5（标准版）/ 2.5-flash（免费档，仅 720P）',
+        modelSave: '保存模型',
+        modelSaving: '保存中…',
+        modelOk: '已保存，下一次调用起使用新模型。',
+        modelFail: '改动未被接受，请重试或手改 profile 的 cordis.patch.yml。',
         enableLabel: '启用识图（agnes_image_recognize）',
         warnTitle: '不要在主会话里用 read_image 看图',
         warnBody:
@@ -264,6 +289,16 @@ window.__ModuleLoader__.load({
       const [savingPaths, setSavingPaths] = useState(false)
       const [pathsMsg, setPathsMsg] = useState(null)
 
+      // 三个模型：识图（对话模型）/ 生图 / 生视频
+      const textModelValue = typeof value.textModel === 'string' ? value.textModel : ''
+      const imageModelValue = typeof value.imageModel === 'string' ? value.imageModel : ''
+      const videoModelValue = typeof value.videoModel === 'string' ? value.videoModel : ''
+      const [textModelDraft, setTextModelDraft] = useState(textModelValue)
+      const [imageModelDraft, setImageModelDraft] = useState(imageModelValue)
+      const [videoModelDraft, setVideoModelDraft] = useState(videoModelValue)
+      const [savingModels, setSavingModels] = useState(false)
+      const [modelsMsg, setModelsMsg] = useState(null)
+
       useEffect(() => {
         setDraft(currentKey)
       }, [currentKey])
@@ -279,6 +314,18 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         setRootsDraft(rootsValue)
       }, [rootsValue])
+
+      useEffect(() => {
+        setTextModelDraft(textModelValue)
+      }, [textModelValue])
+
+      useEffect(() => {
+        setImageModelDraft(imageModelValue)
+      }, [imageModelValue])
+
+      useEffect(() => {
+        setVideoModelDraft(videoModelValue)
+      }, [videoModelValue])
 
       async function save() {
         if (!form || !writable || savingKey) return
@@ -310,6 +357,22 @@ window.__ModuleLoader__.load({
           setPathsMsg({ kind: 'err', text: t('pathsFail') })
         } finally {
           setSavingPaths(false)
+        }
+      }
+
+      async function saveModels() {
+        if (!form || !writable || savingModels) return
+        setSavingModels(true)
+        setModelsMsg(null)
+        try {
+          const ok1 = await form.set('textModel', textModelDraft.trim())
+          const ok2 = await form.set('imageModel', imageModelDraft.trim())
+          const ok3 = await form.set('videoModel', videoModelDraft.trim())
+          setModelsMsg(ok1 && ok2 && ok3 ? { kind: 'ok', text: t('modelOk') } : { kind: 'err', text: t('modelFail') })
+        } catch {
+          setModelsMsg({ kind: 'err', text: t('modelFail') })
+        } finally {
+          setSavingModels(false)
         }
       }
 
@@ -351,14 +414,6 @@ window.__ModuleLoader__.load({
           h('h4', { className: 'agn-sub' }, t('optGroup')),
           h('ul', null,
             h('li', null, h('b', { className: 'agn-mono' }, 'agnes_image_recognize'), '：', t('toolRecognize')),
-          ),
-          h('p', { className: 'agn-status' },
-            t('freeModels'), ' ',
-            h('a', {
-              href: 'https://www.agnes-ai.cn/zh-Hans/docs/overview',
-              target: '_blank',
-              rel: 'noreferrer',
-            }, t('modelsLink')),
           ),
         ),
 
@@ -410,6 +465,67 @@ window.__ModuleLoader__.load({
                 msg && h('p', { className: 'agn-status ' + (msg.kind === 'ok' ? 'agn-status-ok' : 'agn-status-err'), role: 'status' }, msg.text),
                 !writable && h('p', { className: 'agn-status-err agn-status', role: 'status' }, t('readonly')),
                 status === 'unavailable' && h('p', { className: 'agn-status', role: 'status' }, t('statusUnavailable')),
+              )
+            : h('p', { className: 'agn-status', role: 'status' }, t('formMissing')),
+        ),
+
+        // 3) 模型（识图 / 生图 / 生视频）
+        h('section', null,
+          h('h3', null, t('modelTitle')),
+          h('p', null, t('modelBody'), ' ',
+            h('a', {
+              href: 'https://www.agnes-ai.cn/zh-Hans/docs/overview',
+              target: '_blank',
+              rel: 'noreferrer',
+            }, t('modelsLink')),
+          ),
+          form
+            ? h('div', null,
+                h('div', { className: 'agn-krow' },
+                  h('span', { className: 'agn-klabel' }, t('textModelLabel')),
+                  h('input', {
+                    className: 'agn-input',
+                    type: 'text',
+                    value: textModelDraft,
+                    placeholder: t('textModelPlaceholder'),
+                    disabled: !writable || savingModels,
+                    onChange: (e) => setTextModelDraft(e.target.value),
+                    'aria-label': t('textModelLabel'),
+                  }),
+                ),
+                h('div', { className: 'agn-krow' },
+                  h('span', { className: 'agn-klabel' }, t('imageModelLabel')),
+                  h('input', {
+                    className: 'agn-input',
+                    type: 'text',
+                    value: imageModelDraft,
+                    placeholder: t('imageModelPlaceholder'),
+                    disabled: !writable || savingModels,
+                    onChange: (e) => setImageModelDraft(e.target.value),
+                    'aria-label': t('imageModelLabel'),
+                  }),
+                ),
+                h('div', { className: 'agn-krow' },
+                  h('span', { className: 'agn-klabel' }, t('videoModelLabel')),
+                  h('input', {
+                    className: 'agn-input',
+                    type: 'text',
+                    value: videoModelDraft,
+                    placeholder: t('videoModelPlaceholder'),
+                    disabled: !writable || savingModels,
+                    onChange: (e) => setVideoModelDraft(e.target.value),
+                    'aria-label': t('videoModelLabel'),
+                  }),
+                ),
+                h('div', { className: 'agn-krow' },
+                  h('button', {
+                    className: 'agn-btn agn-btn-primary',
+                    type: 'button',
+                    onClick: saveModels,
+                    disabled: !writable || savingModels,
+                  }, savingModels ? t('modelSaving') : t('modelSave')),
+                ),
+                modelsMsg && h('p', { className: 'agn-status ' + (modelsMsg.kind === 'ok' ? 'agn-status-ok' : 'agn-status-err'), role: 'status' }, modelsMsg.text),
               )
             : h('p', { className: 'agn-status', role: 'status' }, t('formMissing')),
         ),
