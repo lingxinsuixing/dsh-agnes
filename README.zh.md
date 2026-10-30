@@ -68,12 +68,17 @@ AGNES_API_KEY: your-key
 
 ## 产物放在哪
 
-生成的媒体文件写入 `outputDir` 指定的目录（默认：当前工作目录下的 `media/`），每次调用会返回写入的绝对路径。
+生成的媒体文件写入 `outputDir` 指定的目录（默认：DSH 主目录下的 `media/`，即 `$DSH_HOME/media`；没设 `$DSH_HOME` 就用 `~/.dsh/media`），每次调用会返回写入的绝对路径。
+
+`saveTo` 必须指向**已存在**的目录：插件不会在任意路径自动建目录，文件名也由插件生成，不会覆盖你已有的文件。
+
+识图要读的本地图片可以用 `allowedReadRoots`（绝对路径目录列表）限制；留空 = 任何可读的图片都接受。
 
 ## 环境要求
 
 - DeepSeek Harness，`@deepseek-ai/schemastery` `>=3.18.1`
 - 一把 Agnes API Key
+- Agnes 生图目前免费；生视频由 Agnes 按生成秒数计费（`-flash` 变体目前限 720P）
 
 ## 许可
 

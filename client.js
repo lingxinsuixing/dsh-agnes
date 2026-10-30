@@ -3,9 +3,14 @@
  *
  * 在 `plugins.bundle.config` 槽注册（key = 本包名 @lingxinsuixing/dsh-agnes）：
  * Web 界面「插件 → @lingxinsuixing/dsh-agnes」页的描述与行之间显示中文配置面板，包含：
- *   1. 功能说明（三个工具做什么）
+ *   1. 功能说明（主要功能 2 个 + 可选能力 1 个，分组列出）
  *   2. API Key 配置（经 configForms 写回本 profile 的 config.apiKey，HMR 热生效）
  *   3. 权限说明（网络 / 本地文件 / 密钥 / 会话隐私 / 参考媒体）
+ *
+ * 工具分层：
+ *   主要功能（永远注册）：agnes_image_generate（生图）、agnes_video_generate（生视频）
+ *   可选能力（带开关）：  agnes_image_recognize（识图）——由 config.enableRecognition 控制，
+ *                        面板上的复选框直接写这个字段（热生效；没立刻变化就重启一次 DSH）
  *
  * 纯 JS client 模块：只 require('react')（浏览器模块表），不引用宿主 client 包；
  * 样式用主题 token（var 带回退），控件自绘。
@@ -46,6 +51,7 @@ window.__ModuleLoader__.load({
           '(main) Text-to-video / first-last frame / reference generation; when the async task finishes, the mp4 is downloaded to a local directory, returning only the path and URL.',
         toolRecognize:
           '(optional, switchable below) Image recognition — screenshot analysis, OCR, chart/table extraction, in-image text translation. Local files are read and sent as Data URI, so image bytes stay out of the session log; the result is text only.',
+        optGroup: 'Optional feature',
         optTitle: 'Optional feature: image recognition',
         optBody:
           'Recognition sends the image to the Agnes vision model and brings back text only — no image bytes ' +
@@ -56,6 +62,9 @@ window.__ModuleLoader__.load({
           'openai-responses or openai-completions. Only DSH\u2019s own read_image needs the provider switched to ' +
           'openai-completions; without that switch, do not give the model image input, because one read_image ' +
           'bricks the whole conversation (400 is not retried and every turn rebuilds the full history).',
+        optOkOn: 'Recognition is enabled. The tool list updates live (or after one DSH restart).',
+        optOkOff: 'Recognition is disabled. The tool list updates live (or after one DSH restart).',
+        optFail: 'The change was not accepted. Try again or edit the profile\u2019s cordis.patch.yml manually.',
         enableLabel: 'Enable image recognition (agnes_image_recognize)',
         warnTitle: 'Do not use read_image inside the main conversation',
         warnBody:
@@ -86,7 +95,7 @@ window.__ModuleLoader__.load({
         permTitle: 'Permissions',
         permNetwork: 'Network: calls only the Agnes API (https://api.agnes-ai.cn) for recognition, image and video generation. No other outbound calls.',
         permFiles:
-          'Local files: writes generated images/videos to a local directory (default: the media folder under the current working directory; configurable via config.outputDir).',
+          'Local files: writes generated images/videos to a local directory (default: the media folder under the DSH home directory — $DSH_HOME/media, or ~/.dsh/media; configurable via config.outputDir). A saveTo argument must point to an existing directory.',
         permKey:
           'Key: the API key is kept in this profile\u2019s config / DSH credential store / env; it is never logged into the session.',
         permPrivacy:
@@ -106,6 +115,7 @@ window.__ModuleLoader__.load({
           '（主要）文生视频 / 首尾帧 / 参考生成，异步任务完成后把 mp4 下载到本地目录，只回路径与 URL。',
         toolRecognize:
           '（可选，可在下关闭）识别图片——截图分析、OCR、图表/表格提取、图内文字翻译。本地图片读盘后转 Data URI 发送，图片字节不进会话日志，只回文字。',
+        optGroup: '可选能力',
         optTitle: '可选能力：图片识别',
         optBody:
           '识图把图片发给 Agnes 视觉模型，回来的只有文字，图片字节不会进对话。关掉它就只剩生图与生视频。' +
@@ -114,6 +124,9 @@ window.__ModuleLoader__.load({
           '声明：识图功能不需要改 provider 就能用——它跟 DSH 的 openai-responses / openai-completions 无关。' +
           '只有 DSH 原生的 read_image 要在主会话里看图时，provider 才必须改成 openai-completions；' +
           '不改就别给模型勾图片输入能力，否则一次 read_image 就会把整个会话钉死（400 不重试 + 每轮重建全部历史）。',
+        optOkOn: '已启用识图。工具列表会热更新（没立刻变化就重启一次 DSH）。',
+        optOkOff: '已关闭识图。工具列表会热更新（没立刻变化就重启一次 DSH）。',
+        optFail: '改动未被接受，请重试或手改 profile 的 cordis.patch.yml。',
         enableLabel: '启用识图（agnes_image_recognize）',
         warnTitle: '不要在主会话里用 read_image 看图',
         warnBody:
@@ -142,7 +155,7 @@ window.__ModuleLoader__.load({
         permTitle: '权限说明',
         permNetwork: '网络：仅调用 Agnes API（https://api.agnes-ai.cn）做识图、图生、视频生成；不做其他外呼。',
         permFiles:
-          '本地文件：把生成的图片/视频写入本地目录（默认当前工作目录下的 media 子目录，可用 config.outputDir 改）。',
+          '本地文件：把生成的图片/视频写入本地目录（默认 DSH 主目录下的 media 子目录，即 $DSH_HOME/media，没设则用 ~/.dsh/media，可用 config.outputDir 改）。saveTo 必须指向已存在的目录。',
         permKey: '密钥：API Key 保存在本 profile 配置（明文）/ DSH 凭据库 / 环境变量，不会进入会话日志。',
         permPrivacy: '会话隐私：图片字节与视频文件不写入会话记录；工具结果只有文字与本地路径。',
         permMedia:
@@ -163,14 +176,15 @@ window.__ModuleLoader__.load({
 .agn-btn:disabled{opacity:.5;cursor:default}
 .agn-btn-primary{background:var(--dsw-alias-bg-emphasis,#0b6ea8);color:#fff;border-color:transparent}
 .agn-tag{font-size:11px;padding:1px 6px;border-radius:9999px;border:1px solid var(--dsw-alias-border,#d0d7de);color:var(--dsw-alias-label-secondary,#57606a)}
-.agn-tag.ok{color:#1a7f37;border-color:currentColor}
+.agn-tag.ok{color:var(--dsw-alias-state-success-primary,#1a7f37);border-color:currentColor}
 .agn-status{margin-top:8px;font-size:12px;color:var(--dsw-alias-label-secondary,#57606a)}
-.agn-status-ok{color:#1a7f37}
-.agn-status-err{color:#c0392b}
+.agn-status-ok{color:var(--dsw-alias-state-success-primary,#1a7f37)}
+.agn-status-err{color:var(--dsw-alias-state-error-primary,#c0392b)}
 .agn-mono{font-family:ui-monospace,Consolas,monospace;font-size:12px}
-.agn-warn{border-left:3px solid #d29922;background:rgba(210,153,34,.08);padding:8px 10px;border-radius:0 6px 6px 0;margin:0}
-.agn-warn h3{margin:0 0 4px;color:var(--dsw-alias-label-primary,inherit)}
-.agn-warn p{margin:0}
+.agn-sub{margin:10px 0 2px;font-size:12px;font-weight:600;color:var(--dsw-alias-label-primary,inherit)}
+.agn-warn{border-left:3px solid var(--dsw-alias-state-warn-primary,#d29922);background:var(--dsw-alias-state-warn-tertiary,rgba(210,153,34,.08));padding:8px 10px;border-radius:0 6px 6px 0;margin:0}
+.agn-warn h3{margin:0 0 4px;color:var(--dsw-alias-state-warn-primary,inherit)}
+.agn-warn p{margin:0;color:var(--dsw-alias-label-secondary,#57606a)}
 .agn-check{display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer}
 .agn-check input{width:15px;height:15px;margin:0;cursor:pointer}
 `
@@ -192,7 +206,8 @@ window.__ModuleLoader__.load({
 
       const [draft, setDraft] = useState(currentKey)
       const [show, setShow] = useState(false)
-      const [saving, setSaving] = useState(false)
+      const [savingKey, setSavingKey] = useState(false) // 只管 Key 保存
+      const [savingOpt, setSavingOpt] = useState(false) // 只管识图开关，两者互不影响
       const [msg, setMsg] = useState(null) // { kind: 'ok' | 'err', text }
       const [optMsg, setOptMsg] = useState(null) // 可选能力开关自己的提示
       // 可选能力开关：enableRecognition 默认 true（=注册识图工具）
@@ -208,31 +223,40 @@ window.__ModuleLoader__.load({
       }, [recogEnabled])
 
       async function save() {
-        if (!form || !writable || saving) return
-        setSaving(true)
+        if (!form || !writable || savingKey) return
+        setSavingKey(true)
         setMsg(null)
         try {
           const ok = await form.set('apiKey', draft.trim())
           setMsg(ok ? { kind: 'ok', text: t('saveOk') } : { kind: 'err', text: t('saveFail') })
-        } catch (e) {
-          setMsg({ kind: 'err', text: t('saveFail') + '（' + (e && e.message ? e.message : e) + '）' })
+        } catch {
+          // 不回显原始异常信息（可能带出密钥内容），只给通用失败文案
+          setMsg({ kind: 'err', text: t('saveFail') })
         } finally {
-          setSaving(false)
+          setSavingKey(false)
         }
       }
 
       async function toggleRecognition(next) {
-        if (!form || !writable || saving) return
-        setSaving(true)
+        if (!form || !writable || savingOpt) return
+        setSavingOpt(true)
         setOptMsg(null)
+        // 乐观更新：先把开关拨到目标状态，别让用户等一次往返才看到反应；
+        // 服务端拒绝或抛错时回滚到已知状态（recogEnabled 来自配置快照）。
+        setRecogDraft(next)
         try {
           const ok = await form.set('enableRecognition', next)
-          if (ok) setRecogDraft(next)
-          setOptMsg(ok ? { kind: 'ok', text: t('saveOk') } : { kind: 'err', text: t('saveFail') })
-        } catch (e) {
-          setOptMsg({ kind: 'err', text: t('saveFail') + '（' + (e && e.message ? e.message : e) + '）' })
+          if (ok) {
+            setOptMsg({ kind: 'ok', text: next ? t('optOkOn') : t('optOkOff') })
+          } else {
+            setRecogDraft(recogEnabled)
+            setOptMsg({ kind: 'err', text: t('optFail') })
+          }
+        } catch {
+          setRecogDraft(recogEnabled)
+          setOptMsg({ kind: 'err', text: t('optFail') })
         } finally {
-          setSaving(false)
+          setSavingOpt(false)
         }
       }
 
@@ -243,9 +267,13 @@ window.__ModuleLoader__.load({
         h('section', null,
           h('h3', null, t('aboutTitle')),
           h('p', null, t('aboutBody')),
+          h('h4', { className: 'agn-sub' }, t('mainTitle')),
           h('ul', null,
             h('li', null, h('b', { className: 'agn-mono' }, 'agnes_image_generate'), '：', t('toolGenerate')),
             h('li', null, h('b', { className: 'agn-mono' }, 'agnes_video_generate'), '：', t('toolVideo')),
+          ),
+          h('h4', { className: 'agn-sub' }, t('optGroup')),
+          h('ul', null,
             h('li', null, h('b', { className: 'agn-mono' }, 'agnes_image_recognize'), '：', t('toolRecognize')),
           ),
         ),
@@ -276,7 +304,7 @@ window.__ModuleLoader__.load({
                     type: show ? 'text' : 'password',
                     value: draft,
                     placeholder: t('keyPlaceholder'),
-                    disabled: !writable || saving,
+                    disabled: !writable || savingKey,
                     onChange: (e) => setDraft(e.target.value),
                     'aria-label': t('keyLabel'),
                   }),
@@ -284,7 +312,7 @@ window.__ModuleLoader__.load({
                     className: 'agn-btn',
                     type: 'button',
                     onClick: () => setShow((s) => !s),
-                    disabled: !writable || saving,
+                    disabled: !writable || savingKey,
                   }, show ? t('hide') : t('show')),
                 ),
                 h('div', { className: 'agn-krow' },
@@ -292,8 +320,8 @@ window.__ModuleLoader__.load({
                     className: 'agn-btn agn-btn-primary',
                     type: 'button',
                     onClick: save,
-                    disabled: !writable || saving || draft === currentKey,
-                  }, saving ? t('saving') : t('save')),
+                    disabled: !writable || savingKey || draft === currentKey,
+                  }, savingKey ? t('saving') : t('save')),
                 ),
                 msg && h('p', { className: 'agn-status ' + (msg.kind === 'ok' ? 'agn-status-ok' : 'agn-status-err'), role: 'status' }, msg.text),
                 !writable && h('p', { className: 'agn-status-err agn-status', role: 'status' }, t('readonly')),
@@ -312,7 +340,7 @@ window.__ModuleLoader__.load({
                 h('input', {
                   type: 'checkbox',
                   checked: recogDraft,
-                  disabled: !writable || saving,
+                  disabled: !writable || savingOpt,
                   onChange: (e) => toggleRecognition(e.target.checked),
                 }),
                 h('span', null, t('enableLabel')),

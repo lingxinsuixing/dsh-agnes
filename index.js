@@ -24,8 +24,9 @@
  * 不调用的时候本插件对主进程零占用（见 scripts/2026-10-30-agnes-unit-test.mjs 第 7 组断言）。
  */
 import { mkdir, stat, readFile, writeFile, rename, rm } from 'node:fs/promises'
-import { createWriteStream, openSync, readSync, closeSync } from 'node:fs'
-import { join, resolve, basename, isAbsolute } from 'node:path'
+import { createWriteStream, openSync, readSync, closeSync, mkdirSync, accessSync, existsSync, statSync, constants as fsConstants } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
+import { join, resolve, basename, isAbsolute, relative } from 'node:path'
 import Schema from '@deepseek-ai/schemastery'
 
 /** Config 默认值（与 schema 默认一一对应；Loader 未给 config 时的兜底） */
@@ -37,7 +38,8 @@ const DEFAULTS = {
   textModel: 'agnes-3.0-flash',
   imageModel: 'agnes-image-2.5-flash',
   videoModel: 'agnes-video-2.5',
-  outputDir: '', // 空 = 运行期解析为 <cwd>/media（跨机器可用；不要写死绝对路径）
+  outputDir: '', // 空 = 运行期解析为 <DSH_HOME>/media（不是进程 cwd：cwd 是宿主进程的工作目录，可能是只读系统目录）
+  allowedReadRoots: [], // 本地图片读取白名单（绝对路径）；空 = 不限制
   maxImageBytes: 10 * 1024 * 1024,
   maxDownloadBytes: 200 * 1024 * 1024, // 单个产物（图片/视频）下载体积上限
   maxResponseBytes: 32 * 1024 * 1024, // 单次 API 响应体上限（防 b64 图片撑爆内存）
@@ -57,7 +59,8 @@ export const Config = Schema.object({
   textModel: Schema.string().default('agnes-3.0-flash').description('可选：识图（视觉理解）模型'),
   imageModel: Schema.string().default('agnes-image-2.5-flash').description('主要：图像生成模型'),
   videoModel: Schema.string().default('agnes-video-2.5').description('主要：视频生成模型（-flash 变体仅 720P/限参考媒体）'),
-  outputDir: Schema.string().default('').description('生成产物保存目录（绝对路径）。留空则保存到当前工作目录下的 media 子目录'),
+  outputDir: Schema.string().default('').description('生成产物保存目录（绝对路径）。留空则保存到 DSH 主目录下的 media 子目录（$DSH_HOME/media，未设置则用 ~/.dsh/media）'),
+  allowedReadRoots: Schema.array(Schema.string()).default([]).description('本地图片读取白名单（绝对路径列表）。留空 = 不限制；填了就只允许读取这些目录下的文件'),
   maxImageBytes: Schema.number().default(10 * 1024 * 1024).description('识图输入图片字节上限'),
   maxDownloadBytes: Schema.number().default(200 * 1024 * 1024).description('单个产物下载体积上限（字节）'),
   maxResponseBytes: Schema.number().default(32 * 1024 * 1024).description('单次 API 响应体上限（字节）'),
@@ -65,6 +68,45 @@ export const Config = Schema.object({
   pollIntervalMs: Schema.number().default(2000).description('视频任务轮询间隔（ms）'),
   pollTimeoutMs: Schema.number().default(1_800_000).description('视频任务轮询总时限（ms）'),
 })
+
+/** 本地图片读取白名单：config.allowedReadRoots 非空时，只允许读这些根目录下的文件 */
+function assertReadablePath(abs, roots, tool) {
+  const list = (Array.isArray(roots) ? roots : []).map((r) => String(r ?? '').trim()).filter(Boolean)
+  if (!list.length) return
+  const ok = list.some((root) => {
+    const r = resolve(root)
+    const rel = relative(r, abs)
+    return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+  })
+  if (!ok) {
+    throw new Error(`${tool}: 读取路径不在 config.allowedReadRoots 白名单内: ${abs}（白名单：${list.join(', ')}）`)
+  }
+}
+
+/** 截断式 JSON 摘要：别先把整个响应（可能带 base64 图片）序列化再切——那会白占一遍内存 */
+function briefJson(data, max = 300) {
+  let s
+  try {
+    s = JSON.stringify(data, (k, v) => (typeof v === 'string' && v.length > 200 ? v.slice(0, 200) + '…' : v)) ?? String(data)
+  } catch {
+    s = String(data)
+  }
+  return s.slice(0, max)
+}
+
+/** 实际像素的画幅（归一到常见比例；认不出就给约分结果） */
+function ratioOf(width, height) {
+  if (!width || !height) return ''
+  const gcd = (a, b) => (b ? gcd(b, a % b) : a)
+  const d = gcd(width, height) || 1
+  const rw = width / d
+  const rh = height / d
+  for (const k of ['1:1', '3:4', '4:3', '16:9', '9:16', '2:3', '3:2', '21:9']) {
+    const [a, b] = k.split(':').map(Number)
+    if (Math.abs(rw / a - rh / b) < 0.03) return k
+  }
+  return rw + ':' + rh
+}
 
 // ---------------------------------------------------------------- helpers
 
@@ -106,8 +148,9 @@ function sniffImageMime(bytes) {
   return null
 }
 
-async function loadLocalImageAsDataUri(image, maxBytes, signal, tool) {
+async function loadLocalImageAsDataUri(image, maxBytes, signal, tool, roots) {
   const abs = resolve(image)
+  assertReadablePath(abs, roots, tool)
   const info = await stat(abs).catch(() => null)
   if (!info?.isFile()) throw new Error(`${tool}: 图片文件不存在或不是文件: ${image}`)
   if (info.size > maxBytes) throw new Error(`${tool}: 图片 ${info.size} 字节超过上限 ${maxBytes}（config.maxImageBytes 可调）`)
@@ -201,7 +244,16 @@ async function agnesFetch(cfg, apiKey, { method = 'POST', path, body, signal, ti
       }
       throw new Error(`Agnes 网络错误: ${err?.message ?? err}`)
     }
-    const text = await readTextCapped(resp, cfg.maxResponseBytes ?? 32 * 1024 * 1024, 'Agnes')
+    let text
+    try {
+      text = await readTextCapped(resp, cfg.maxResponseBytes ?? 32 * 1024 * 1024, 'Agnes')
+    } catch (err) {
+      // 读 body 期间超时/取消也会走这里：换成友好文案，别让裸 AbortError 冒到界面上
+      if (ac.signal.aborted) {
+        throw new Error(timerFired ? `Agnes 请求超时（>${timeoutMs} ms）: ${method} ${path ?? url}` : '调用已取消，未执行 Agnes 请求')
+      }
+      throw err
+    }
     let data = null
     try { data = JSON.parse(text) } catch { /* 非 JSON 响应 */ }
     if (!resp.ok) {
@@ -251,7 +303,9 @@ function extFromContent(type, url) {
 async function writeBufferToFile(dir, buf, ext, kind) {
   await mkdir(dir, { recursive: true })
   const file = join(dir, `agnes-${kind}-${stamp()}-${Math.random().toString(36).slice(2, 6)}${ext}`)
-  await writeFile(file, buf)
+  const tmp = file + '.part'
+  await writeFile(tmp, buf)
+  await rename(tmp, file)
   return file
 }
 
@@ -274,7 +328,11 @@ async function downloadToFile(dir, url, signal, timeoutMs, kind, maxBytes) {
       const resp = await fetch(url, { signal: ac.signal, redirect: 'follow' })
       if (!resp.ok) {
         const e = new Error(`${kind} 下载失败 HTTP ${resp.status}: ${url}`)
-        if (resp.status < 500 && resp.status !== 429) throw e // 4xx 不重试
+        // 4xx 是确定性错误（URL 过期/403/404），重试只会白等 3 秒并给出误导性的"重试"文案
+        if (resp.status < 500 && resp.status !== 429) {
+          e.nonRetryable = true
+          throw e
+        }
         lastErr = e
         throw e
       }
@@ -308,6 +366,7 @@ async function downloadToFile(dir, url, signal, timeoutMs, kind, maxBytes) {
     } catch (err) {
       await rm(tmp, { force: true }).catch(() => {})
       lastErr = err
+      if (err?.nonRetryable) throw err
       if (signal?.aborted) throw err
       if (timerFired) throw new Error(`${kind} 下载超时（>${timeoutMs} ms）: ${url}`)
       if (attempt < 2) await sleep(Math.min(1000 * (attempt + 1), 4000), signal)
@@ -320,15 +379,70 @@ async function downloadToFile(dir, url, signal, timeoutMs, kind, maxBytes) {
   throw lastErr
 }
 
-/** 产物目录：模型给的 saveTo 必须绝对路径；config.outputDir 留空则用 <cwd>/media（跨机器可用） */
+/**
+ * 默认产物目录：<DSH_HOME>/media（没设 DSH_HOME 就 ~/.dsh/media），再退 homedir/media、最后临时目录。
+ * 为什么不用 process.cwd()：cwd 是**宿主进程**的工作目录，不是用户的工作区——
+ * 本机实测宿主 cwd 恰好是工作区根目录（产物会散落在那），从开始菜单/服务方式启动时 cwd 多半是
+ * 安装目录或 C:\Windows\System32（只读）→ 落盘这一步 EACCES 失败，
+ * 而图/视频**已经生成并计费**了。先探可写性再落盘，别让钱白花。
+ */
+function defaultOutDir() {
+  const home = String(process.env.DSH_HOME ?? '').trim() || join(homedir(), '.dsh')
+  const candidates = [join(home, 'media'), join(homedir(), 'media'), join(tmpdir(), 'dsh-agnes-media')]
+  for (const dir of candidates) {
+    try {
+      mkdirSync(dir, { recursive: true })
+      accessSync(dir, fsConstants.W_OK)
+      return dir
+    } catch { /* 试下一个 */ }
+  }
+  return join(tmpdir(), 'dsh-agnes-media')
+}
+
+/**
+ * 产物目录：
+ *  - config.outputDir：插件自己的目录，自动创建
+ *  - saveTo（模型给的）：必须绝对路径、且**必须已存在**——插件不在任意路径自动建目录，
+ *    免得被提示注入诱导在机器上到处建目录树；文件名由插件生成（唯一），不会覆盖别人的文件
+ *  - 都没给：defaultOutDir()
+ */
 function resolveOutDir(saveTo, cfg) {
   if (saveTo !== undefined && saveTo !== null && String(saveTo).trim()) {
     const dir = String(saveTo).trim()
     if (!isAbsolute(dir)) throw new Error(`保存目录必须是绝对路径: ${dir}`)
-    return resolve(dir)
+    const abs = resolve(dir)
+    if (!existsSync(abs)) {
+      throw new Error(`保存目录不存在: ${abs}（插件不会在任意路径自动建目录；请先创建该目录，或改用 config.outputDir）`)
+    }
+    if (!statSync(abs).isDirectory()) throw new Error(`保存路径不是目录: ${abs}`)
+    return abs
   }
   const cfgDir = String(cfg.outputDir ?? '').trim()
-  return cfgDir ? resolve(cfgDir) : join(process.cwd(), 'media')
+  return cfgDir ? resolve(cfgDir) : defaultOutDir()
+}
+
+/**
+ * 内网/回环/链路本地地址判定。
+ * 为什么拦：这些 URL 不是我们自己去取，而是**Agnes 服务端**去取——
+ * 指向内网就等于借 Agnes 的手去探用户自己的内网。直接拒掉。
+ */
+function isPrivateHost(hostname) {
+  const h = String(hostname ?? '').toLowerCase().replace(/^\[|\]$/g, '')
+  if (!h) return true
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal')) return true
+  if (/^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h)) return true
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true
+  if (h === '::1' || h === '::' || /^f[cd][0-9a-f]{2}:/.test(h) || /^fe[89ab][0-9a-f]:/.test(h)) return true
+  return false
+}
+
+/** 只查主机：给识图的 URL 输入用（那里本地路径是合法的） */
+function assertPublicHost(value, tool, field) {
+  let u
+  try { u = new URL(String(value)) } catch { throw new Error(`${tool}: ${field} 不是合法 URL: ${value}`) }
+  if (isPrivateHost(u.hostname)) {
+    throw new Error(`${tool}: ${field} 指向内网/回环地址（${u.hostname}），已拒绝——这类地址会被 Agnes 服务端去取，等于借它的手探内网。请改用公网可访问的地址。`)
+  }
 }
 
 /** 媒体 URL 校验：Agnes 参考媒体必须公网可访问，本地路径直接拒绝并说明 */
@@ -336,6 +450,7 @@ function requirePublicUrl(value, field, tool) {
   if (!isUrl(value)) {
     throw new Error(`${tool}: ${field} 只接受 http(s) 公网 URL（Agnes 服务需要能直接访问参考媒体）；本地文件请先上传到可公开访问的地址。收到: ${value}`)
   }
+  assertPublicHost(value, tool, field)
   return value
 }
 
@@ -396,10 +511,11 @@ export function makeRecognizeTool(cfg, credentials) {
       let imageUrl
       let via
       if (isUrl(image)) {
+        assertPublicHost(image, 'agnes_image_recognize', 'image')
         imageUrl = image
         via = 'url'
       } else {
-        imageUrl = await loadLocalImageAsDataUri(image, cfg.maxImageBytes, signal, 'agnes_image_recognize')
+        imageUrl = await loadLocalImageAsDataUri(image, cfg.maxImageBytes, signal, 'agnes_image_recognize', cfg.allowedReadRoots)
         via = 'data-uri'
       }
       const prompt = String(args.prompt ?? '').trim() || '请详细描述这张图片的内容（主体、场景、图中文字、风格、可能的用途）。'
@@ -463,6 +579,7 @@ export function makeImageTool(cfg, credentials) {
           size: { type: 'string' },
           ratio: { type: 'string' },
           requestedSize: { type: 'string' },
+          requestedRatio: { type: 'string' },
           sizeMapped: { type: 'boolean' },
           revisedPrompt: { type: 'string' },
         },
@@ -472,8 +589,9 @@ export function makeImageTool(cfg, credentials) {
       render: (_args, v) => [
         {
           type: 'text',
-          text: `[Agnes 图生] 已保存到 ${v.path}（实际 ${v.size}${v.ratio}，模型 ${cfg.imageModel}）。` +
-            (v.sizeMapped ? `注意：接口把请求的 ${v.requestedSize} 映射成了 ${v.size}。` : '') +
+          text: `[Agnes 图生] 已保存到 ${v.path}（实际 ${v.size}${v.ratio ? ' ' + v.ratio : ''}，模型 ${cfg.imageModel}）。` +
+            (v.sizeMapped ? `注意：接口把请求的精确尺寸 ${v.requestedSize} 映射成了 ${v.size}。` : '') +
+            (v.requestedRatio && v.ratio && v.requestedRatio !== v.ratio ? `（请求画幅 ${v.requestedRatio}，实际按 ${v.ratio} 出图）` : '') +
             (v.url ? `原始 URL: ${v.url}` : '（接口未返回 URL，已直接落盘）') +
             (v.revisedPrompt ? `\n模型改写后的提示词: ${v.revisedPrompt}` : ''),
         },
@@ -484,8 +602,13 @@ export function makeImageTool(cfg, credentials) {
       const apiKey = await requireKey(cfg, credentials)
       const prompt = String(args.prompt ?? '').trim()
       if (!prompt) throw new Error('agnes_image_generate: `prompt` 不能为空')
-      const size = String(args.size ?? '1K')
+      // 2.0 模型只吃精确尺寸（传档位会 400），所以默认值跟着模型走
+      const isLegacyImage = /image-2\.0/.test(cfg.imageModel)
+      const size = String(args.size ?? (isLegacyImage ? '1024x768' : '1K'))
       const ratio = String(args.ratio ?? '1:1')
+      if (isLegacyImage && IMAGE_SIZE_TIERS.has(size)) {
+        throw new Error(`agnes_image_generate: 模型 ${cfg.imageModel} 只接受精确尺寸（如 1024x768），不能填档位 ${size}`)
+      }
       if (!IMAGE_SIZE_TIERS.has(size) && !EXACT_SIZE_RE.test(size)) {
         throw new Error(`agnes_image_generate: size 只能是 ${[...IMAGE_SIZE_TIERS].join('/')} 或精确尺寸（如 1024x768），收到 ${JSON.stringify(args.size)}`)
       }
@@ -497,7 +620,12 @@ export function makeImageTool(cfg, credentials) {
       for (const r of refs) {
         const s = String(r ?? '').trim()
         if (!s) continue
-        resolvedRefs.push(isUrl(s) ? s : await loadLocalImageAsDataUri(s, cfg.maxImageBytes, signal, 'agnes_image_generate'))
+        if (isUrl(s)) {
+          assertPublicHost(s, 'agnes_image_generate', 'references[]')
+          resolvedRefs.push(s)
+        } else {
+          resolvedRefs.push(await loadLocalImageAsDataUri(s, cfg.maxImageBytes, signal, 'agnes_image_generate', cfg.allowedReadRoots))
+        }
       }
       const body = { model: cfg.imageModel, prompt, size, extra_body: { response_format: 'url' } }
       if (!/image-2\.0/.test(cfg.imageModel)) body.ratio = ratio
@@ -524,13 +652,17 @@ export function makeImageTool(cfg, credentials) {
         }
         file = await writeBufferToFile(dir, buf, '.png', 'image')
       } else {
-        throw new Error('Agnes 图像生成未返回可用结果。原始响应: ' + JSON.stringify(data)?.slice(0, 300))
+        throw new Error('Agnes 图像生成未返回可用结果。原始响应: ' + briefJson(data))
       }
       // 回报**实际**像素尺寸：接口会把精确尺寸映射到最接近的档位，只报回显值会骗人
       const dim = imageDimensions(file)
       const actual = dim ? dim.width + 'x' + dim.height : ''
-      const out = { path: file, url, size: actual || size, ratio, requestedSize: size }
-      if (actual && actual !== size) out.sizeMapped = true
+      const actualRatio = dim ? ratioOf(dim.width, dim.height) : ''
+      const out = { path: file, url, size: actual || size, ratio: actualRatio || ratio, requestedSize: size, requestedRatio: ratio }
+      // 只有「请求了精确尺寸、接口却给了别的像素」才叫被映射；
+      // 档位请求（2K）本来就会兑现成具体像素，那不是映射，是正常兑现
+      // （布尔值始终给出，别让调用方去猜 undefined 是「没映射」还是「没测」）
+      out.sizeMapped = !!(actual && EXACT_SIZE_RE.test(size) && actual !== size)
       if (item?.revised_prompt) out.revisedPrompt = item.revised_prompt
       return out
     },
@@ -543,11 +675,12 @@ export function makeImageTool(cfg, credentials) {
  * 而接口回显的 size 字段仍是原样传上去的值。只报回显值会骗人，所以这里读实际文件。
  * 只解析 PNG / JPEG；认不出来就返回 null（调用方回退到接口回显值）。
  */
-function imageDimensions(filePath) {
+export function imageDimensions(filePath) {
   let fd
   try {
     fd = openSync(filePath, 'r')
-    const head = Buffer.alloc(64 * 1024)
+    // 256KB：有些 JPEG 前面塞了很大的 EXIF/ICC 段，64KB 窗口会读不到 SOFn
+    const head = Buffer.alloc(256 * 1024)
     const n = readSync(fd, head, 0, head.length, 0)
     if (n >= 24 && head.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
       // PNG: IHDR 的宽高在偏移 16/20（大端）
@@ -688,6 +821,13 @@ export function makeVideoTool(cfg, credentials) {
         if (imgUrls.length > 5) throw new Error('agnes_video_generate: flash 模型参考图最多 5 张')
         if (audioUrls.length > 3) throw new Error('agnes_video_generate: flash 模型参考音频最多 3 段')
         if (videoRefs.length) throw new Error(`agnes_video_generate: flash 模型 ${cfg.videoModel} 不支持参考视频（videos）`)
+      } else {
+        // 标准模型的上限（Agnes 文档）：参考图 ≤8、参考音频 ≤3、参考视频 ≤1、媒体合计 ≤12
+        if (imgUrls.length > 8) throw new Error('agnes_video_generate: 参考图最多 8 张')
+        if (audioUrls.length > 3) throw new Error('agnes_video_generate: 参考音频最多 3 段')
+        if (videoRefs.length > 1) throw new Error('agnes_video_generate: 参考视频最多 1 段')
+        const mediaTotal = imgUrls.length + audioUrls.length + videoRefs.length
+        if (mediaTotal > 12) throw new Error(`agnes_video_generate: 参考媒体合计最多 12 个（收到 ${mediaTotal}）`)
       }
 
       const body = {
@@ -716,12 +856,11 @@ export function makeVideoTool(cfg, credentials) {
         timeoutMs: 60_000,
       })
       const videoId = created?.video_id || created?.id
-      if (!videoId) throw new Error('Agnes 创建视频任务未返回 video_id。原始响应: ' + JSON.stringify(created)?.slice(0, 300))
+      if (!videoId) throw new Error('Agnes 创建视频任务未返回 video_id。原始响应: ' + briefJson(created))
 
       // 2) 轮询（video_id + model_name，全部模式适用；429 指数退避）
       // 轮询端点在 baseUrl 的根级路径上（见 Agnes 文档），但要保留 baseUrl 的路径前缀，
       // 否则把 baseUrl 换成带前缀的部署地址时会打到错误的接口。
-      const origin = new URL(cfg.baseUrl).origin
       const pollBase = cfg.baseUrl.replace(/\/+$/, '').replace(/\/v\d+(\.\d+)?$/, '')
       const query = () =>
         agnesFetch(cfg, apiKey, {
@@ -754,7 +893,7 @@ export function makeVideoTool(cfg, credentials) {
         const status = q?.status
         if (status === 'completed') {
           const videoUrl = q.url
-          if (!videoUrl) throw new Error('Agnes 视频任务 completed 但未返回 url。原始响应: ' + JSON.stringify(q)?.slice(0, 300))
+          if (!videoUrl) throw new Error('Agnes 视频任务 completed 但未返回 url。原始响应: ' + briefJson(q))
           const dir = resolveOutDir(args.saveTo, cfg)
           const file = await downloadToFile(dir, videoUrl, signal, cfg.httpTimeoutMs, 'video', cfg.maxDownloadBytes)
           return {
@@ -771,7 +910,7 @@ export function makeVideoTool(cfg, credentials) {
           throw new Error(`Agnes 视频任务失败: ${q?.error?.message ?? JSON.stringify(q?.error ?? {})}`)
         }
         if (Date.now() > deadline) {
-          throw new Error(`agnes_video_generate: 轮询超时（>${cfg.pollTimeoutMs} ms），任务可能仍在排队/生成。video_id=${videoId}，可稍后手动查询: ${origin}/agnesapi?video_id=${videoId}&model_name=${cfg.videoModel}`)
+          throw new Error(`agnes_video_generate: 轮询超时（>${cfg.pollTimeoutMs} ms），任务可能仍在排队/生成。video_id=${videoId}，可稍后手动查询: ${pollBase}/agnesapi?video_id=${videoId}&model_name=${cfg.videoModel}`)
         }
         if (q) interval = cfg.pollIntervalMs // 成功查询恢复默认间隔（429 退避过期）
         await sleep(interval, signal)
