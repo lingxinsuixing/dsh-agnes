@@ -353,7 +353,15 @@ async function downloadToFile(dir, url, signal, timeoutMs, kind, maxBytes) {
             throw new Error(`${kind} 体积超过上限 ${limit} 字节`)
           }
           if (!ws.write(Buffer.from(value))) {
-            await new Promise((res2, rej) => ws.once('drain', res2).once('error', rej))
+            // 背压：等 drain。注意两个监听都要摘掉——原来每次背压都往 WriteStream 上叠一个
+            // never-removed 的 error 监听器，下载大文件会触发 MaxListenersExceededWarning
+            // （活体冒烟测试实测：11 error listeners added to [WriteStream]）
+            await new Promise((res2, rej) => {
+              const onDrain = () => { ws.off('error', onErr); res2() }
+              const onErr = (e) => { ws.off('drain', onDrain); rej(e) }
+              ws.once('drain', onDrain)
+              ws.once('error', onErr)
+            })
           }
         }
         await new Promise((res2, rej) => ws.end((err) => (err ? rej(err) : res2())))
