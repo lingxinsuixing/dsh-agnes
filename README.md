@@ -61,6 +61,10 @@ Image recognition is optional. Set `enableRecognition: false` in the plugin conf
 > `read_image` requires the provider to be switched to `openai-completions`; without that switch, do not
 > give the model image input, because one `read_image` bricks the whole conversation.
 
+If your provider talks to Agnes over `api: openai-completions`, declare `reasoningEfforts` in the model entry as well.
+Without it DSH does not send `reasoning_effort`, the gateway returns no `reasoning_content`, and the model writes its whole
+reasoning process into the message body — the thinking chain ends up in the conversation.
+
 ### Do not use `read_image` inside the main conversation
 
 > Once a model is marked as supporting images, the built-in `read_image` puts an image content block into

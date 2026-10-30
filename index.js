@@ -475,13 +475,10 @@ export function makeRecognizeTool(cfg, credentials) {
   return {
     name: 'agnes_image_recognize',
     description:
-      '【可选能力 · 识图】用 Agnes 视觉模型识别图片，返回文字结果（截图分析、OCR/文字转录、图表与表格提取、图片描述、图内文字翻译等）。' +
+      '【可选能力 · 识图】用 Agnes 视觉模型识别图片，返回文字结果（截图分析、OCR、图表提取、图片描述、图内文字翻译等）。' +
       '图片传本地绝对路径或 http(s) URL；本地文件读盘后转 Data URI 发送，图片字节不进会话日志，工具结果只有文字。' +
-      '务必传明确具体的 prompt（如「把图中表格提取成 CSV」「转录所有文字并翻译成中文」），不要依赖默认描述。' +
-      '识图是可选能力，可在插件设置里关掉；它不需要改 provider（跟 openai-responses / openai-completions 无关）。' +
-      '也请用本工具而不是 DSH 的 read_image：后者会把图片内容块塞进主会话，' +
-      'Agnes 网关的 /v1/responses 不认图片内容块（转 chat 时兜底成 unknown）会 400，且 400 不重试、每轮又重建全部历史，' +
-      '一条坏消息就能钉死整个会话。',
+      '务必传明确具体的 prompt（如「把图中表格提取成 CSV」），不要依赖默认描述。' +
+      '看图用本工具，别用 DSH 的 read_image（图片内容块会破坏主会话）。',
     parameters: {
       type: 'object',
       properties: {
@@ -548,11 +545,10 @@ export function makeImageTool(cfg, credentials) {
   return {
     name: 'agnes_image_generate',
     description:
-      '【主要功能 · 图生】用 Agnes 图像模型生成或编辑图片（文生图：不传 references；图生图/多图合成：传 references）。' +
+      '【主要功能 · 图生】用 Agnes 图像模型生成或编辑图片（不传 references = 文生图；传 references = 图生图/多图合成）。' +
       '成图自动下载到本地目录，工具结果只含本地路径与 URL（图片内容不进会话日志）。生成需数秒到数十秒。' +
-      'references 元素可为本地绝对路径（自动转 Data URI）或 http(s) URL，最多 8 张。编辑指令要写清「改什么 + 保留什么」。' +
-      'size 可填档位 1K/2K/3K/4K（配 ratio 宽高比）或精确尺寸（如 1920x1080）；注意接口会把精确尺寸映射到最近档位，' +
-      '返回的 size 是落盘文件的真实像素。',
+      'references 可为本地绝对路径或 http(s) URL，最多 8 张；编辑指令写清「改什么 + 保留什么」。' +
+      'size 填档位 1K/2K/3K/4K（配 ratio 宽高比）或精确尺寸（如 1920x1080）；返回的 size 是落盘文件的真实像素。',
     parameters: {
       type: 'object',
       properties: {
@@ -724,7 +720,7 @@ export function makeVideoTool(cfg, credentials) {
       '【主要功能 · 视频】用 Agnes 视频模型生成视频（异步任务：创建后轮询到完成，自动把 mp4 下载到本地目录）。' +
       'mode=text 纯文生视频；mode=keyframe 首帧/尾帧控制（firstFrame/lastFrame，至少一个）；' +
       'mode=reference 参考生成（images/audios/videos 至少一类非空，prompt 里用 <Picture N>、<Audio N>、<Video N> 指代素材，N 各自从 1 起）。' +
-      '所有参考媒体只接受 http(s) 公网 URL（Agnes 服务端要能直接访问；本地文件不行）。' +
+      '所有参考媒体只接受 http(s) 公网 URL（本地文件不行）。' +
       'seconds 为字符串 "4"–"12"（默认 "5"）；size：720P/1080P/1K/2K（flash 模型仅 720P）；结果只含本地路径与 URL。',
     parameters: {
       type: 'object',

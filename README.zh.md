@@ -59,6 +59,10 @@ AGNES_API_KEY: your-key
 > 只有 DSH 原生的 `read_image` 要在主会话里看图时，provider 才必须改成 `openai-completions`；
 > 不改就别给模型勾图片输入能力，否则一次 `read_image` 就会把整个会话钉死（400 不重试 + 每轮重建全部历史）。
 
+如果你的 provider 用的是 `api: openai-completions`，模型条目里**还要声明 `reasoningEfforts`**。
+不声明的话 DSH 不会发 `reasoning_effort`，网关也就不会返回 `reasoning_content`，
+模型会把整条推理过程直接写进正文——**思考链暴露到会话**。补上就正常了。
+
 ### 不要在主会话里用 `read_image` 看图
 
 > 模型一旦勾上「支持图片」，DSH 自带的 `read_image` 就会把图片内容块塞进主会话；而 Agnes 网关的
