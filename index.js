@@ -476,9 +476,8 @@ export function makeRecognizeTool(cfg, credentials) {
     name: 'agnes_image_recognize',
     description:
       '【可选能力 · 识图】用 Agnes 视觉模型识别图片，返回文字结果（截图分析、OCR、图表提取、图片描述、图内文字翻译等）。' +
-      '图片传本地绝对路径或 http(s) URL；本地文件读盘后转 Data URI 发送，图片字节不进会话日志，工具结果只有文字。' +
-      '务必传明确具体的 prompt（如「把图中表格提取成 CSV」），不要依赖默认描述。' +
-      '看图用本工具，别用 DSH 的 read_image（图片内容块会破坏主会话）。',
+      '图片传本地绝对路径或 http(s) URL（本地文件读盘后转 Data URI 发送），工具结果只有文字。' +
+      '务必传明确具体的 prompt（如「把图中表格提取成 CSV」），不要依赖默认描述。',
     parameters: {
       type: 'object',
       properties: {
@@ -546,7 +545,7 @@ export function makeImageTool(cfg, credentials) {
     name: 'agnes_image_generate',
     description:
       '【主要功能 · 图生】用 Agnes 图像模型生成或编辑图片（不传 references = 文生图；传 references = 图生图/多图合成）。' +
-      '成图自动下载到本地目录，工具结果只含本地路径与 URL（图片内容不进会话日志）。生成需数秒到数十秒。' +
+      '成图自动下载到本地目录，工具结果只含本地路径与 URL。生成需数秒到数十秒。' +
       'references 可为本地绝对路径或 http(s) URL，最多 8 张；编辑指令写清「改什么 + 保留什么」。' +
       'size 填档位 1K/2K/3K/4K（配 ratio 宽高比）或精确尺寸（如 1920x1080）；返回的 size 是落盘文件的真实像素。',
     parameters: {
@@ -721,7 +720,7 @@ export function makeVideoTool(cfg, credentials) {
       'mode=text 纯文生视频；mode=keyframe 首帧/尾帧控制（firstFrame/lastFrame，至少一个）；' +
       'mode=reference 参考生成（images/audios/videos 至少一类非空，prompt 里用 <Picture N>、<Audio N>、<Video N> 指代素材，N 各自从 1 起）。' +
       '所有参考媒体只接受 http(s) 公网 URL（本地文件不行）。' +
-      'seconds 为字符串 "4"–"12"（默认 "5"）；size：720P/1080P/1K/2K（flash 模型仅 720P）；结果只含本地路径与 URL。',
+      'seconds 为字符串 "4"–"12"（默认 "5"）；size：720P/1080P/1K/2K（flash 模型仅 720P）。结果只含本地路径与 URL。',
     parameters: {
       type: 'object',
       properties: {
